@@ -1,0 +1,402 @@
+---
+title: "Fawn Nutrition Experiments"
+output: html_document
+---
+
+<style type="text/css">
+  body{ /* Normal */
+    font-family: "Time New Roman", Serif;
+    font-size: 14px;
+  }
+  h1.title {
+    font-size: 22px;
+    font-family: "Times New Roman", Times, serif;
+  }
+  h1 { /* Header 1 */
+    font-size: 20px;
+    font-family: "Times New Roman", Times, serif;
+  }
+  h2 { /* Header 2 */
+    font-size: 18px;
+    font-family: "Times New Roman", Times, serif;
+  }
+  h3 { /* Header 3 */
+    font-size: 16px;
+    font-family: "Times New Roman", Times, serif;
+  }
+</style>
+
+# Summary of the Data
+
+White tail deer fawns of both sexes were collected in 1994 and were subjected to a feed regimen of one of three possible treatments 1) High-High (high protein feed throughout), 2) Low-Low (low protein feed throughout) or 3) Low-High (low protein feed in phase 1 followed by a high protein feed in phase 2). The ultimate goal was to determine if white tail deer exhibit compensatory growth. If so, we would expect to see that fawns subjected to a low protein diet in phase 1 followed by a high protein diet in phase 2, were able to catch up to their high-high treatment counterparts. There were mortalities observed throughout the study and across all treatment groups.
+
+
+# Data Visualization
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(warning = FALSE, echo = TRUE)
+
+# Libraries
+library(ggplot2)
+library(lubridate)
+library(fmsb)
+library(car)
+library(tidyr)
+library(tidyverse)
+
+# Import data
+data = read.csv("Deer Nutrition Trials_edited.csv")
+
+# Define as date
+data$DATE <- as.Date(data$DATE, format="%m/%d/%Y")
+data$Day <- difftime(data$DATE, as.Date("1994-10-11", format="%Y-%m-%d"), units="days")
+# Convert to numeric
+data$Day <- as.numeric(data$Day)
+# Create factor level that are more readable
+data$Sex = ifelse(data$SEX=="F", "Female", "Male")
+data$Treatment = ifelse(data$TREAT==1, "High-High", 
+                        ifelse(data$TREAT==2, "Low-High",
+                               "Low-Low"))
+data$Phase <- ifelse(data$PHASE=="1", "Phase 1", "Phase 2")
+# Save only corrected tags
+data$Tag <- data$TAG_CORR
+# Remove the extra "6" factor level
+data <- data[!(data$PHASE==2&data$PROCESS==6),]
+# Transition day from phase 1 to phase 2
+switch <- unique(data$Day[data$PROCESS==6])
+# Remove unnecessary columns
+data <- data[,c("PEN", "WEIGHT_KG", "GIRTH", "LENGTH", "MORTALITY", "Day", "Sex", "Treatment", "Phase", "Tag")]
+```
+
+```{r, echo = FALSE, warning = FALSE, message = FALSE}
+## DATA VISUALIZATION
+# Make plot with treatment and sex (global)
+ggplot(data=data, aes(x=Day, y=WEIGHT_KG))+
+  facet_grid(Sex~Treatment, scales="free_y")+
+  geom_point()+
+  geom_smooth()+
+  theme(legend.position="none")+
+  xlab("Time (days)")+
+  ylab("Weight (Kg)")+
+  geom_vline(xintercept=switch)+
+  ggtitle("Average Weight over Time by Treatment Type")
+
+# Make plot with treatment and sex (individual)
+ggplot(data=data, aes(x=Day, y=WEIGHT_KG, col=as.factor(Tag)))+
+  facet_grid(Sex~Treatment, scales="free_y")+
+  geom_point()+
+  geom_smooth()+
+  theme(legend.position="none")+
+  xlab("Time (days)")+
+  ylab("Weight (Kg)")+
+  geom_vline(xintercept=switch)+
+  ggtitle("Individual Weight over Time by Treatment Type")
+```
+
+# Question 1: Were there weight differences among the treatment groups at the end of the study?
+
+## Hypothesis 1: Deer body size (weight) is driven to cummulative nutrition.
+
+### Prediction 1: The high-high group > low-high group > low-low group
+
+## Hypothesis 2: Deer body size (weight) exhibit compensatory growth.
+
+### Prediction 2: The high-high and low-high groups are similar but > low-low group
+
+## Hypothesis 3: Deer body size (weight) is driven by nutirtional quality early in childhood and is not recoverable (permanently stunted).
+
+### Prediction 3: The high-high group > both low-high and low-low groups which are similar to each other
+
+## Hypothesis 4: Deer body size (weight) is not driven by nutritional quality.
+
+### Prediction 4: There are no differences in body weights among the treatment groups.
+  
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+# Subset individuals who are alive at the end of the study
+end_wts = data[data$Day==max(data$Day),]
+
+# Make boxplot of body size by treatment and sex
+ggplot(data=end_wts, aes(x = Treatment, y = WEIGHT_KG))+
+  facet_wrap(vars(Sex))+
+  geom_boxplot()+
+  theme(legend.position="none")+
+  xlab("Treatment")+
+  ylab("Weight (Kg)")+
+  ggtitle("Final Body Weight by Treatment and Sex")
+
+# Look at distribution of ending weights
+ggplot(data = end_wts, aes(x = WEIGHT_KG, fill = Sex))+
+  geom_histogram()+
+  xlab("Weight (kg)")+
+  ylab("Count")+
+  ggtitle("Distribution of Ending Weights by Sex")
+  #No link needed
+
+# Compare differences among treatment groups by sex
+model1 = glm(WEIGHT_KG~Sex+Treatment, data = end_wts, family=Gamma(link = "identity"))
+# View diagnostic plots
+par(mfrow=c(2,2))
+plot(model1)
+  #No major violations
+# View results
+summary(model1)
+  #Sex appears to be important with males > females
+  #Treatment does not appear to be important
+
+# Calculate R2
+NagelkerkeR2(model1)$R2
+  #42% variation explained by sex and treatment
+  #Results consistent with hypothesis 5. Although hypothesis 2 is still plausible if means are unbiased estimators but large standard deviations are due to low sample size.
+```
+
+There is not any evidence that female deer body weights are driven by nutrition. While the mean body weights for males appear to support prediction 1, there is too much variation within treatment groups to conclude that there is a relationship between body weight and treatment group for males (trend/means consistent with expectation, not significant/precise).
+
+
+# Question 2: Did treatment groups experience different amounts of mortality?
+## Hypothesis 1: Deer fawn mortality is related to nutritional quality (treatment). 
+### Prediction 1: The low-low group > low-high group > high-high group (more restricted individuals more likely to die). 
+### Prediction 2: The low-low group = low-high group > high-high group (individuals restricted earlier in life suffer higher rates of mortality)
+### Prediction 3: The low-low group > low-high group = high-high group (individuals restricted later in life suffer higher rates of mortality). 
+### Prediction 4: Either low-low group = low-high group = high-high group or another arrangement (mortality not driven by nutritional content)
+
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+# Count numbers of deer that died per treatment per phase
+# Separate by treatment
+treat1 = data[data$Treatment=="High-High",]
+treat2 = data[data$Treatment=="Low-High",]
+treat3 = data[data$Treatment=="Low-Low",]
+
+# Summarize by Time and Sex
+tr1_sextime = tapply(treat1$Tag, INDEX=list(treat1$Sex, treat1$Day), length)
+tr2_sextime = tapply(treat2$Tag, INDEX=list(treat2$Sex, treat2$Day), length)
+tr3_sextime = tapply(treat3$Tag, INDEX=list(treat3$Sex, treat3$Day), length)
+
+# Create new data set for deaths
+deaths = data.frame(
+  Time = c(rep(unique(data$Day),6)),
+  Sex = c(rep("Female", 27), rep("Male", 27)),
+  Count = c(tr1_sextime[1,], tr2_sextime[1,], tr3_sextime[1,],
+            tr1_sextime[2,], tr2_sextime[2,], tr3_sextime[2,]),
+  Treatment = rep(c(rep("High-High", 9), rep("Low-High", 9), rep("Low-Low", 9)), 2),
+  Phase = rep(c(rep("1", 6), rep("2", 3)), 6))
+
+# Look at distribution of deaths
+ggplot(data = deaths, aes(x = Count, fill = Sex))+
+  geom_histogram(position = position_dodge())+
+  xlab("Deaths")+
+  ylab("Frequency")+
+  ggtitle("Distribution of Deaths by Sex")
+  #No link needed
+
+# Compare deaths among treatment groups by sex
+model2 = glm(Count ~ Sex + Treatment, data = deaths, family = poisson(link = "identity"))
+# Diagnostic plots
+par(mfrow=c(2,2))
+plot(model2)
+  #No violations
+# Calculate VIF
+vif(model2)
+  #VIF<=3.0, not inflated
+# View results
+summary(model2)
+  #More females die than males
+  #Treatment does not appear to be important in determining # of deaths
+# Calculate Nagelkerke R2
+NagelkerkeR2(model2)$R2
+  #58% of variation in mortalities is explained by sex and treatment
+
+# Number of deaths per treatment over time
+ggplot(data=deaths, aes(x=Time, y=Count, color = Sex, fill = Sex))+
+  geom_point()+
+  facet_grid(cols = vars(Treatment), rows = vars(Sex))+
+  ylab("Deaths")+
+  facet_wrap(Treatment~.)+
+  geom_smooth(method="lm", formula=y~x)+
+  geom_vline(xintercept=switch, col="black")
+
+# Boxplots
+ggplot(data=deaths, aes(y=Count, fill = Sex))+
+  facet_grid(cols = vars(Treatment))+
+  ylab("Deaths")+
+  geom_boxplot()+
+  theme(axis.text.x = element_blank(),
+        axis.ticks.x = element_blank())
+
+```
+
+There does not appear to be any difference in deaths among the treatment groups.
+
+
+# Question 3: Are there changes in growth rates between the treatment groups over time?
+## Hypothesis 1: Treatment affects the starting rate of growth. 
+### Prediction 1: Intercepts: High-High > Low-High > Low-Low. With higher nutrition, higher intial rates of growth.
+# Hypothesis 2: Treatment affects the trend of growth rate over time (decceleration).
+## Prediction 2: Slopes: Low-Low > Low-High > High-High. With higher nutrition, higher decceleration (reach maximum body weight faster). 
+## Hypothesis 3: Treatment affects both the starting rate of growth and the rate of growth decceleration.
+### Prediction 3: Intercepts: High-High > Low-High > Low-Low and Slopes: Low-Low > Low-High > High-High. With higher nutrition, higher inital rates of growth and greater decceleration (reaches maximum body rate faster).
+## Hypothesis 4: Treatment does not appear to affect either intial growth rate or the rate of growth decceleration.
+### Prediction 4: Intercepts and Slopes: High-High = Low-High = Low-Low
+
+```{r, echo = F, warning = F, message = F}
+# Days of data per tag (ID)
+obs_per_tag = tapply(data$Tag, data$Tag, length)
+# Individuals with one observation per tag
+tags_1 = obs_per_tag[obs_per_tag<=1]
+# Remove from dataset (cannot calculate delta)
+data_rates = data[!(data$Tag %in% names(tags_1)),]
+
+# Preallocate rates with 0
+data_rates$delta_kg = 0
+# Number of unique sample days
+uniq_days = unique(data_rates$Day)
+# Create a data frame to hold delta summary data
+deltas = data.frame(
+  start_day = uniq_days[1:(length(uniq_days)-1)],
+  end_day = uniq_days[2:length(uniq_days)]
+)
+# Calculate time lapse (days) between weights
+deltas$delta_days = deltas$end_day - deltas$start_day
+deltas$mid_pts = (deltas$start_day + deltas$end_day)/2
+# Tag # with > 1 weight
+uniq_tags = unique(data_rates$Tag)
+
+# for each individual, calculate bw_change(t+1-t)
+for(i in 1:length(uniq_tags)){
+  # extract data for specific individual
+  indiv = data_rates[data_rates$Tag==uniq_tags[i],c("Tag", "Day", "WEIGHT_KG", 
+                                                    "Sex", "Treatment")]
+  # create weight_t+1 column
+  indiv$wt_t0 = indiv$WEIGHT_KG
+  indiv$wt_t1 = c(indiv$WEIGHT_KG[2:nrow(indiv)], 0)
+  # remove final row (no subsequent weight)
+  indiv = indiv[1:(nrow(indiv)-1),]
+  # calculate delta weight
+  indiv$delta_wt = indiv$wt_t1 - indiv$wt_t0
+  # Create condition vector
+  delta_wt = indiv$delta_wt
+  # Use while loop to add NAs until vector is correct length for data frame
+  while(length(delta_wt)!=nrow(deltas)){
+    delta_wt = c(delta_wt, NA)
+  }
+  # Add to global df
+  deltas[as.character(uniq_tags[i])] <- delta_wt
+}
+
+# Rearrange data frame
+deltas2 = pivot_longer(deltas, cols = 5:60, names_to = "Tag", values_to = "Delta_wt_kg")
+
+# Assign Tag to character
+data_rates$Tag = as.character(data_rates$Tag)
+
+# Merge and add sex and treatment info back
+deltas2 = left_join(deltas2, data_rates[,c("Sex", "Treatment", "Tag")], by = "Tag")
+
+# Remove duplicates
+deltas2 = deltas2[!duplicated(deltas2),]
+
+# Change from raw change in body weight to rate
+deltas2$Wt_kg_rate = deltas2$Delta_wt_kg/deltas2$delta_days
+
+# Create Graph
+ggplot(data = deltas2, aes(x = end_day, y = Wt_kg_rate))+
+  geom_point()+
+  geom_smooth(formula = y~x, method = "lm")+
+  facet_grid(rows = vars(Sex), cols = vars(Treatment))+
+  xlab("Time Interval Midpoint (Days)")+
+  ylab("Body Weight Change (deltaKg/time)")+
+  ggtitle("Change in Weight by Treatment and Sex")
+
+# Histogram of response variable
+ggplot(data = deltas2, aes(x = Wt_kg_rate, fill = Sex))+
+  geom_histogram(position = position_dodge())+
+  xlab("Weight Change (delta Kg/time)")+
+  ylab("Frequency")
+# Should be normally distributed
+
+# Define as factor
+deltas2$Treatment = as.factor(deltas2$Treatment)
+# Define low-low as the "default"/"baseline" level
+deltas2$Treatment = relevel(deltas2$Treatment, ref = "Low-Low")
+
+# Too many factors, lets separate models based on sex
+males = deltas2[deltas2$Sex == "Male",]
+females = deltas2[deltas2$Sex == "Female",]
+
+# Male model
+mod_male = lm(Wt_kg_rate ~ end_day + Treatment + end_day:Treatment, data = males)
+# Examine results
+summary(mod_male)
+# R2 is 0.104, very low
+# Examine diagnostic plots
+par(mfrow=c(2,2))
+plot(mod_male)
+# Calculate confidence intervals
+male_sum = as.data.frame(confint(mod_male))
+# intercept: LL diff from HH, but not from LH
+# no slope differences detectable
+
+# Female model
+mod_female = lm(Wt_kg_rate ~ end_day + Treatment + end_day:Treatment, data = females)
+# Examine results
+summary(mod_female)
+#R2 is 0.04293, very low
+# Examine diagnostic plots
+par(mfrow=c(2,2))
+plot(mod_female)
+# Calculate confidence intervals
+female_sum = as.data.frame(confint(mod_female))
+# intercept: LL different from HH and LH, unsure about to each other
+# may have slope difference between HH and LH and LL
+
+# Rename confidence interval columns names
+colnames(male_sum) = c("Lower_2.5", "Upper_97.5")
+colnames(female_sum) = c("Lower_2.5", "Upper_97.5")
+
+# Extract best estimates and add
+male_sum$Median_50 = mod_male$coefficients
+female_sum$Median_50 = mod_female$coefficients
+
+# Extract row names and add to column
+male_sum$Coeff = row.names(male_sum)
+female_sum$Coeff = row.names(female_sum)
+
+# Pivot and gather columns
+t_male_sum = pivot_longer(male_sum, cols = 1:3, names_to = "Type", values_to = "Value")
+t_female_sum = pivot_longer(female_sum, cols = 1:3, names_to = "Type", values_to = "Value")
+
+# Combine together
+CIs = rbind(t_male_sum, t_female_sum)
+# Add column for sex
+CIs$Sex = rep(c("Male", "Female"), each = nrow(CIs)/2)
+
+# Reclassify
+CIs$Coefficient = recode(CIs$Coeff,
+                                "(Intercept)" = "Intercept:Low-Low", 
+                                "end_day" = "Slope:Low-Low", 
+                                "TreatmentHigh-High" = "Intercept:High-High", 
+                                "TreatmentLow-High" = "Intercept:Low-High", 
+                                "end_day:TreatmentHigh-High" = "Slope:High-High",
+                                "end_day:TreatmentLow-High" = "Slope:Low-High")
+# Separate slopes and intercepts
+CIs$Beta_Type = sapply(strsplit(CIs$Coefficient, split = ":"), "[[", 1)
+# Separate treatments
+CIs$Treatment = sapply(strsplit(CIs$Coefficient, split = ":"), "[[", 2)
+                               
+
+# Lengthen the data set so that one column for each variable type (upper, lower and median)
+wider = pivot_wider(data = CIs, names_from = Type, values_from = Value)
+
+# Plot confidence intervals of the model estimates
+ggplot(data = wider, aes(x = Treatment, y = Median_50))+
+  geom_point()+
+  geom_errorbar(aes(ymin = Lower_2.5, ymax = Upper_97.5))+
+  facet_grid(rows = vars(Beta_Type), cols = vars(Sex), scales = "free_y")+
+  xlab("Treatment")+
+  ylab(expression("       Slope of rate ("*Delta*"kg/"*Day^2*")    Baseline rate ("*Delta*"kg/Day)         "))+
+  #ylab(expression("Baseline rate "~Delta~"Kg/Day"))+ #THIS FORMAT WORKS
+  ggtitle("Growth Rate over Time by Sex and Treatment")
+
+```
+
+There does not appear to be any difference in growth rates between the treatment types in either initial rate of growth/baseline growth or rate of decceleration of growth over time for either sex.
+
